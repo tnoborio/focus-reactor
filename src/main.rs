@@ -1,6 +1,8 @@
 use anyhow::Result;
 use eframe::egui;
 use muda::{Menu, MenuId, MenuItem};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tray_icon::{TrayIcon, TrayIconBuilder};
@@ -38,9 +40,28 @@ fn main() -> Result<()> {
 
     // メニュー作成
     let show_app_id = MenuId::new("show_app");
+    let quit_id = MenuId::new("quit");
     let menu = Menu::new();
-    let show_app_item = MenuItem::with_id(show_app_id.clone(), "Show app (o)", true, None);
+    let show_app_item = MenuItem::with_id(
+        show_app_id.clone(),
+        "Show app",
+        true,
+        Some(muda::accelerator::Accelerator::new(
+            Some(muda::accelerator::Modifiers::META),
+            muda::accelerator::Code::KeyO,
+        )),
+    );
+    let quit_item = MenuItem::with_id(
+        quit_id.clone(),
+        "Quit",
+        true,
+        Some(muda::accelerator::Accelerator::new(
+            Some(muda::accelerator::Modifiers::META),
+            muda::accelerator::Code::KeyQ,
+        )),
+    );
     menu.append(&show_app_item)?;
+    menu.append(&quit_item)?;
 
     // トレイアイコン作成（空のアイコン - macOSではテキストのみ表示可能）
     let tray_icon = TrayIconBuilder::new()
@@ -49,7 +70,7 @@ fn main() -> Result<()> {
         .with_title("⏸ Idle")
         .build()?;
 
-    let tray_icon = Arc::new(Mutex::new(tray_icon));
+    let tray_icon = Rc::new(RefCell::new(tray_icon));
 
     // メニューイベントハンドラ
     let shared_for_menu = Arc::clone(&shared_state);
@@ -58,6 +79,8 @@ fn main() -> Result<()> {
             if let Ok(mut state) = shared_for_menu.lock() {
                 state.should_focus = true;
             }
+        } else if event.id == quit_id {
+            std::process::exit(0);
         }
     }));
 
@@ -70,7 +93,7 @@ fn main() -> Result<()> {
     };
 
     let shared_for_app = Arc::clone(&shared_state);
-    let tray_for_app = Arc::clone(&tray_icon);
+    let tray_for_app = Rc::clone(&tray_icon);
 
     eframe::run_native(
         "Focus Reactor",
@@ -90,11 +113,11 @@ struct FocusReactorApp {
     max_duration: u64,
     last_tick: Instant,
     shared_state: Arc<Mutex<SharedState>>,
-    tray_icon: Arc<Mutex<TrayIcon>>,
+    tray_icon: Rc<RefCell<TrayIcon>>,
 }
 
 impl FocusReactorApp {
-    fn new(shared_state: Arc<Mutex<SharedState>>, tray_icon: Arc<Mutex<TrayIcon>>) -> Self {
+    fn new(shared_state: Arc<Mutex<SharedState>>, tray_icon: Rc<RefCell<TrayIcon>>) -> Self {
         Self {
             state: TimerState::Idle,
             work_duration: 25 * 60, // 25分
@@ -107,8 +130,8 @@ impl FocusReactorApp {
     }
 
     fn update_tray(&self) {
-        if let Ok(tray) = self.tray_icon.lock() {
-            let _ = tray.set_title(Some(&self.state.get_tray_text()));
+        if let Ok(tray) = self.tray_icon.try_borrow() {
+            tray.set_title(Some(&self.state.get_tray_text()));
         }
         if let Ok(mut shared) = self.shared_state.lock() {
             shared.state = self.state;
