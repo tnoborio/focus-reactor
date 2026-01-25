@@ -1,0 +1,11 @@
+[package]
+name = "focus_reactor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.31"
+anyhow = "1.0"
+time = { version = "0.3", features = ["macros", "formatting"] }
+tray-icon = "0.19"
+muda = "0.15"
