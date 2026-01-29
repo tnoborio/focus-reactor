@@ -145,7 +145,11 @@ struct FocusReactorApp {
 impl FocusReactorApp {
     fn new(shared_state: Arc<Mutex<SharedState>>, tray_icon: Rc<RefCell<TrayIcon>>) -> Self {
         #[cfg(target_os = "macos")]
-        let macos_sb = objc2_foundation::MainThreadMarker::new().map(MonospaceStatusBar::new);
+        let macos_sb = objc2_foundation::MainThreadMarker::new().map(|mtm| {
+            let mut sb = MonospaceStatusBar::new(mtm);
+            sb.set_menu();
+            sb
+        });
 
         let app = Self {
             state: TimerState::Idle,

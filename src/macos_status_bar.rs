@@ -1,13 +1,23 @@
 //! macOS専用: 等幅フォントでステータスバーにテキストを表示するモジュール
 
+use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2_app_kit::{NSFont, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
+use objc2::{msg_send, sel};
+use objc2_app_kit::{
+    NSFont, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+};
 use objc2_foundation::{MainThreadMarker, NSAttributedString, NSDictionary, NSString};
+use std::sync::Arc;
+
+/// メニューアクションのコールバック型
+pub type MenuCallback = Arc<dyn Fn() + Send + Sync>;
 
 /// 等幅フォントを使用するmacOSステータスバーアイテム
 pub struct MonospaceStatusBar {
-    status_item: objc2::rc::Retained<NSStatusItem>,
+    status_item: Retained<NSStatusItem>,
     mtm: MainThreadMarker,
+    #[allow(dead_code)]
+    menu: Option<Retained<NSMenu>>,
 }
 
 impl MonospaceStatusBar {
@@ -16,7 +26,47 @@ impl MonospaceStatusBar {
         let status_bar = NSStatusBar::systemStatusBar();
         let status_item = status_bar.statusItemWithLength(NSVariableStatusItemLength);
 
-        Self { status_item, mtm }
+        Self {
+            status_item,
+            mtm,
+            menu: None,
+        }
+    }
+
+    /// メニューを設定（「アプリを表示」と「終了」）
+    pub fn set_menu(&mut self) {
+        let menu = unsafe { NSMenu::new(self.mtm) };
+
+        // 「アプリを表示」メニューアイテム
+        let show_title = NSString::from_str("アプリを表示");
+        let show_key = NSString::from_str("o");
+        let show_item = unsafe {
+            let item = NSMenuItem::new(self.mtm);
+            item.setTitle(&show_title);
+            item.setAction(Some(sel!(showApp:)));
+            item.setKeyEquivalent(&show_key);
+            item
+        };
+        unsafe { menu.addItem(&show_item) };
+
+        // 「終了」メニューアイテム
+        let quit_title = NSString::from_str("終了");
+        let quit_key = NSString::from_str("q");
+        let quit_item = unsafe {
+            let item = NSMenuItem::new(self.mtm);
+            item.setTitle(&quit_title);
+            item.setAction(Some(sel!(terminate:)));
+            item.setKeyEquivalent(&quit_key);
+            item
+        };
+        unsafe { menu.addItem(&quit_item) };
+
+        // ステータスアイテムにメニューを設定
+        unsafe {
+            let _: () = msg_send![&self.status_item, setMenu: &*menu];
+        }
+
+        self.menu = Some(menu);
     }
 
     /// 等幅フォントでタイトルを設定
