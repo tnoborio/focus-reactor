@@ -7,6 +7,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
+#[cfg(target_os = "macos")]
+mod macos_status_bar;
+#[cfg(target_os = "macos")]
+use macos_status_bar::MonospaceStatusBar;
+
 // タイマーの状態
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TimerState {
@@ -68,7 +73,15 @@ fn main() -> Result<()> {
     menu.append(&show_app_item)?;
     menu.append(&quit_item)?;
 
-    // トレイアイコン作成（空のアイコン - macOSではテキストのみ表示可能）
+    // トレイアイコン作成（macOSではカスタムステータスバーで表示するため、ここでは空タイトル）
+    #[cfg(target_os = "macos")]
+    let tray_icon = TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_tooltip("Focus Reactor")
+        .with_title("") // macOSではカスタムステータスバーを使用
+        .build()?;
+
+    #[cfg(not(target_os = "macos"))]
     let tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip("Focus Reactor")
@@ -123,12 +136,18 @@ struct FocusReactorApp {
     max_duration: u64,
     last_tick: Instant,
     shared_state: Arc<Mutex<SharedState>>,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     tray_icon: Rc<RefCell<TrayIcon>>,
+    #[cfg(target_os = "macos")]
+    macos_sb: Option<MonospaceStatusBar>,
 }
 
 impl FocusReactorApp {
     fn new(shared_state: Arc<Mutex<SharedState>>, tray_icon: Rc<RefCell<TrayIcon>>) -> Self {
-        Self {
+        #[cfg(target_os = "macos")]
+        let macos_sb = objc2_foundation::MainThreadMarker::new().map(MonospaceStatusBar::new);
+
+        let app = Self {
             state: TimerState::Idle,
             work_duration: 25 * 60, // 25分
             break_duration: 5 * 60, // 5分
@@ -136,13 +155,28 @@ impl FocusReactorApp {
             last_tick: Instant::now(),
             shared_state,
             tray_icon,
-        }
+            #[cfg(target_os = "macos")]
+            macos_sb,
+        };
+        app.update_tray();
+        app
     }
 
     fn update_tray(&self) {
-        if let Ok(tray) = self.tray_icon.try_borrow() {
-            tray.set_title(Some(&self.state.get_tray_text(self.work_duration)));
+        let text = self.state.get_tray_text(self.work_duration);
+
+        // macOS: カスタム等幅フォントステータスバーを使用
+        #[cfg(target_os = "macos")]
+        if let Some(ref sb) = self.macos_sb {
+            sb.set_title(&text);
         }
+
+        // 他のプラットフォーム: tray-iconのタイトルを更新
+        #[cfg(not(target_os = "macos"))]
+        if let Ok(tray) = self.tray_icon.try_borrow() {
+            tray.set_title(Some(&text));
+        }
+
         if let Ok(mut shared) = self.shared_state.lock() {
             shared.state = self.state;
         }
