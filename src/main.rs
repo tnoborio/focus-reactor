@@ -11,15 +11,20 @@ use tray_icon::{TrayIcon, TrayIconBuilder};
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum TimerState {
     Idle,
-    Work(u64),  // 残り秒数
-    Break(u64), // 残り秒数
+    Work(u64),         // 残り秒数
+    WorkOvertime(u64), // 延長時間（秒）
+    Break(u64),        // 残り秒数
 }
 
 impl TimerState {
-    fn get_tray_text(&self) -> String {
+    fn get_tray_text(&self, work_duration: u64) -> String {
         match self {
             TimerState::Idle => "⏸ Idle".to_string(),
             TimerState::Work(t) => format!("🍅 {:02}:{:02}", t / 60, t % 60),
+            TimerState::WorkOvertime(overtime) => {
+                let total = work_duration + overtime;
+                format!("🔥 {:02}:{:02}", total / 60, total % 60)
+            }
             TimerState::Break(t) => format!("☕ {:02}:{:02}", t / 60, t % 60),
         }
     }
@@ -88,7 +93,8 @@ fn main() -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([400.0, 180.0])
-            .with_min_inner_size([300.0, 180.0]),
+            .with_min_inner_size([300.0, 180.0])
+            .with_transparent(true),
         ..Default::default()
     };
 
@@ -99,7 +105,11 @@ fn main() -> Result<()> {
         "Focus Reactor",
         options,
         Box::new(move |cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::light());
+            // 透明ウィンドウ用のビジュアル設定
+            let mut visuals = egui::Visuals::light();
+            visuals.window_fill = egui::Color32::TRANSPARENT;
+            visuals.panel_fill = egui::Color32::TRANSPARENT;
+            cc.egui_ctx.set_visuals(visuals);
             Ok(Box::new(FocusReactorApp::new(shared_for_app, tray_for_app)))
         }),
     )
@@ -131,7 +141,7 @@ impl FocusReactorApp {
 
     fn update_tray(&self) {
         if let Ok(tray) = self.tray_icon.try_borrow() {
-            tray.set_title(Some(&self.state.get_tray_text()));
+            tray.set_title(Some(&self.state.get_tray_text(self.work_duration)));
         }
         if let Ok(mut shared) = self.shared_state.lock() {
             shared.state = self.state;
@@ -156,14 +166,21 @@ impl eframe::App for FocusReactorApp {
             self.last_tick = Instant::now();
 
             match self.state {
-                TimerState::Work(t) | TimerState::Break(t) => {
+                TimerState::Work(t) => {
                     if t > 0 {
-                        let next_time = t - 1;
-                        self.state = if matches!(self.state, TimerState::Work(_)) {
-                            TimerState::Work(next_time)
-                        } else {
-                            TimerState::Break(next_time)
-                        };
+                        self.state = TimerState::Work(t - 1);
+                    } else {
+                        // タイムアップ後は延長モードに移行
+                        self.state = TimerState::WorkOvertime(1);
+                    }
+                }
+                TimerState::WorkOvertime(t) => {
+                    // 延長時間をカウントアップ
+                    self.state = TimerState::WorkOvertime(t + 1);
+                }
+                TimerState::Break(t) => {
+                    if t > 0 {
+                        self.state = TimerState::Break(t - 1);
                     } else {
                         self.state = TimerState::Idle;
                     }
@@ -178,9 +195,12 @@ impl eframe::App for FocusReactorApp {
         // 継続的に再描画をリクエスト（タイマー更新のため）
         ctx.request_repaint_after(Duration::from_millis(100));
 
-        // UI描画
+        // UI描画（半透明の白背景で視認性を確保）
         egui::CentralPanel::default()
-            .frame(egui::Frame::central_panel(&ctx.style()).fill(egui::Color32::WHITE))
+            .frame(
+                egui::Frame::central_panel(&ctx.style())
+                    .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 230)),
+            )
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(10.0);
@@ -194,6 +214,14 @@ impl eframe::App for FocusReactorApp {
                             t as f32 / self.max_duration as f32,
                             egui::Color32::from_rgb(255, 80, 80),
                         ),
+                        TimerState::WorkOvertime(overtime) => {
+                            let total = self.work_duration + overtime;
+                            (
+                                format!("🔥 OVERTIME: {:02}:{:02}", total / 60, total % 60),
+                                1.0,                                  // バーは常に満タン
+                                egui::Color32::from_rgb(255, 165, 0), // オレンジ
+                            )
+                        }
                         TimerState::Break(t) => (
                             format!("☕ COOLING DOWN: {:02}:{:02}", t / 60, t % 60),
                             t as f32 / self.max_duration as f32,
@@ -211,7 +239,9 @@ impl eframe::App for FocusReactorApp {
                             .fill(color)
                             .animate(matches!(
                                 self.state,
-                                TimerState::Work(_) | TimerState::Break(_)
+                                TimerState::Work(_)
+                                    | TimerState::WorkOvertime(_)
+                                    | TimerState::Break(_)
                             ));
                     ui.add_sized([350.0, 30.0], progress_bar);
 
