@@ -233,17 +233,40 @@ impl eframe::App for FocusReactorApp {
 
                     ui.add_space(15.0);
 
-                    // プログレスバー
-                    let progress_bar =
-                        egui::ProgressBar::new(progress)
-                            .fill(color)
-                            .animate(matches!(
-                                self.state,
-                                TimerState::Work(_)
-                                    | TimerState::WorkOvertime(_)
-                                    | TimerState::Break(_)
-                            ));
-                    ui.add_sized([350.0, 30.0], progress_bar);
+                    // カスタムプログレスバー（先端に白い丸）
+                    let bar_size = egui::vec2(350.0, 30.0);
+                    let (rect, _response) = ui.allocate_exact_size(bar_size, egui::Sense::hover());
+
+                    if ui.is_rect_visible(rect) {
+                        let painter = ui.painter();
+
+                        // 背景
+                        painter.rect_filled(
+                            rect,
+                            egui::CornerRadius::same(4),
+                            egui::Color32::from_gray(200),
+                        );
+
+                        // 進捗部分
+                        let progress_width = rect.width() * progress;
+                        if progress_width > 0.0 {
+                            let progress_rect = egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(progress_width, rect.height()),
+                            );
+                            painter.rect_filled(progress_rect, egui::CornerRadius::same(4), color);
+                        }
+
+                        // // 先端の白い丸
+                        // let circle_x = rect.min.x + progress_width;
+                        // let circle_y = rect.center().y;
+                        // let circle_radius = rect.height() * 0.35;
+                        // painter.circle_filled(
+                        //     egui::pos2(circle_x, circle_y),
+                        //     circle_radius,
+                        //     egui::Color32::WHITE,
+                        // );
+                    }
 
                     ui.add_space(30.0);
 
