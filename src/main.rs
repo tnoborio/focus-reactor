@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         "Show app",
         true,
         Some(muda::accelerator::Accelerator::new(
-            Some(muda::accelerator::Modifiers::META),
+            None,
             muda::accelerator::Code::KeyO,
         )),
     );
@@ -56,7 +56,7 @@ fn main() -> Result<()> {
         "Quit",
         true,
         Some(muda::accelerator::Accelerator::new(
-            Some(muda::accelerator::Modifiers::META),
+            None,
             muda::accelerator::Code::KeyQ,
         )),
     );
