@@ -1,5 +1,7 @@
 use anyhow::Result;
 use eframe::egui;
+#[cfg(target_os = "macos")]
+use muda::ContextMenu;
 use muda::{Menu, MenuId, MenuItem};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,13 +26,21 @@ enum TimerState {
 impl TimerState {
     fn get_tray_text(&self, work_duration: u64) -> String {
         match self {
-            TimerState::Idle => "⏸ Idle".to_string(),
-            TimerState::Work(t) => format!("🍅 {:02}:{:02}", t / 60, t % 60),
+            TimerState::Idle => "Idle".to_string(),
+            TimerState::Work(t) => format!("{:02}:{:02}", t / 60, t % 60),
             TimerState::WorkOvertime(overtime) => {
                 let total = work_duration + overtime;
-                format!("🔥 {:02}:{:02}", total / 60, total % 60)
+                format!("{:02}:{:02}", total / 60, total % 60)
             }
-            TimerState::Break(t) => format!("☕ {:02}:{:02}", t / 60, t % 60),
+            TimerState::Break(t) => format!("{:02}:{:02}", t / 60, t % 60),
+        }
+    }
+
+    fn get_icon_name(&self) -> &'static str {
+        match self {
+            TimerState::Idle => "stopTemplate.png",
+            TimerState::Work(_) | TimerState::WorkOvertime(_) => "focusTemplate.png",
+            TimerState::Break(_) => "breakTemplate.png",
         }
     }
 }
@@ -73,12 +83,17 @@ fn main() -> Result<()> {
     menu.append(&show_app_item)?;
     menu.append(&quit_item)?;
 
-    // トレイアイコン作成（macOSではカスタムステータスバーで表示するため、ここでは空タイトル）
+    // macOSではmudaのメニューをMonospaceStatusBarに渡すため、tray-iconにはメニューを設定しない
+    #[cfg(target_os = "macos")]
+    let ns_menu_ptr = menu.ns_menu();
+
+    #[cfg(target_os = "macos")]
+    let _menu = menu; // mudaのMenuを保持してNSMenuの寿命を保証
+
     #[cfg(target_os = "macos")]
     let tray_icon = TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
         .with_tooltip("Focus Reactor")
-        .with_title("") // macOSではカスタムステータスバーを使用
+        .with_title("")
         .build()?;
 
     #[cfg(not(target_os = "macos"))]
@@ -123,7 +138,12 @@ fn main() -> Result<()> {
             visuals.window_fill = egui::Color32::TRANSPARENT;
             visuals.panel_fill = egui::Color32::TRANSPARENT;
             cc.egui_ctx.set_visuals(visuals);
-            Ok(Box::new(FocusReactorApp::new(shared_for_app, tray_for_app)))
+            Ok(Box::new(FocusReactorApp::new(
+                shared_for_app,
+                tray_for_app,
+                #[cfg(target_os = "macos")]
+                ns_menu_ptr,
+            )))
         }),
     )
     .map_err(|e| anyhow::anyhow!("eframe error: {}", e))
@@ -143,11 +163,16 @@ struct FocusReactorApp {
 }
 
 impl FocusReactorApp {
-    fn new(shared_state: Arc<Mutex<SharedState>>, tray_icon: Rc<RefCell<TrayIcon>>) -> Self {
+    fn new(
+        shared_state: Arc<Mutex<SharedState>>,
+        tray_icon: Rc<RefCell<TrayIcon>>,
+        #[cfg(target_os = "macos")] ns_menu_ptr: *mut std::ffi::c_void,
+    ) -> Self {
         #[cfg(target_os = "macos")]
         let macos_sb = objc2_foundation::MainThreadMarker::new().map(|mtm| {
-            let mut sb = MonospaceStatusBar::new(mtm);
-            sb.set_menu();
+            let sb = MonospaceStatusBar::new(mtm);
+            sb.set_ns_menu(ns_menu_ptr);
+            sb.set_icon("stopTemplate.png");
             sb
         });
 
@@ -173,6 +198,7 @@ impl FocusReactorApp {
         #[cfg(target_os = "macos")]
         if let Some(ref sb) = self.macos_sb {
             sb.set_title(&text);
+            sb.set_icon(self.state.get_icon_name());
         }
 
         // 他のプラットフォーム: tray-iconのタイトルを更新

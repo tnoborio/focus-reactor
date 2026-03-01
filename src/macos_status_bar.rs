@@ -2,22 +2,16 @@
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{msg_send, sel};
+use objc2::{class, msg_send};
 use objc2_app_kit::{
-    NSFont, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
+    NSFont, NSImage, NSStatusBar, NSStatusItem, NSVariableStatusItemLength,
 };
 use objc2_foundation::{MainThreadMarker, NSAttributedString, NSDictionary, NSString};
-use std::sync::Arc;
-
-/// メニューアクションのコールバック型
-pub type MenuCallback = Arc<dyn Fn() + Send + Sync>;
 
 /// 等幅フォントを使用するmacOSステータスバーアイテム
 pub struct MonospaceStatusBar {
     status_item: Retained<NSStatusItem>,
     mtm: MainThreadMarker,
-    #[allow(dead_code)]
-    menu: Option<Retained<NSMenu>>,
 }
 
 impl MonospaceStatusBar {
@@ -29,44 +23,39 @@ impl MonospaceStatusBar {
         Self {
             status_item,
             mtm,
-            menu: None,
         }
     }
 
-    /// メニューを設定（「アプリを表示」と「終了」）
-    pub fn set_menu(&mut self) {
-        let menu = unsafe { NSMenu::new(self.mtm) };
-
-        // 「アプリを表示」メニューアイテム
-        let show_title = NSString::from_str("アプリを表示");
-        let show_key = NSString::from_str("o");
-        let show_item = unsafe {
-            let item = NSMenuItem::new(self.mtm);
-            item.setTitle(&show_title);
-            item.setAction(Some(sel!(showApp:)));
-            item.setKeyEquivalent(&show_key);
-            item
-        };
-        unsafe { menu.addItem(&show_item) };
-
-        // 「終了」メニューアイテム
-        let quit_title = NSString::from_str("終了");
-        let quit_key = NSString::from_str("q");
-        let quit_item = unsafe {
-            let item = NSMenuItem::new(self.mtm);
-            item.setTitle(&quit_title);
-            item.setAction(Some(sel!(terminate:)));
-            item.setKeyEquivalent(&quit_key);
-            item
-        };
-        unsafe { menu.addItem(&quit_item) };
-
-        // ステータスアイテムにメニューを設定
+    /// 外部のNSMenuポインタ（mudaのContextMenu::ns_menu()等）をステータスアイテムに設定
+    pub fn set_ns_menu(&self, ns_menu_ptr: *mut std::ffi::c_void) {
         unsafe {
-            let _: () = msg_send![&self.status_item, setMenu: &*menu];
+            let menu_obj: &AnyObject = &*(ns_menu_ptr as *const AnyObject);
+            let _: () = msg_send![&self.status_item, setMenu: menu_obj];
         }
+    }
 
-        self.menu = Some(menu);
+    /// アイコンを設定
+    pub fn set_icon(&self, icon_name: &str) {
+        if let Some(button) = self.status_item.button(self.mtm) {
+            let path = format!(
+                "{}/assets/{}",
+                std::env::current_dir().unwrap().display(),
+                icon_name
+            );
+            let ns_string_path = NSString::from_str(&path);
+
+            unsafe {
+                let cls = class!(NSImage);
+                let img_alloc: *mut NSImage = msg_send![cls, alloc];
+                let img_init: *mut NSImage =
+                    msg_send![img_alloc, initByReferencingFile: &*ns_string_path];
+
+                if let Some(img) = Retained::from_raw(img_init) {
+                    img.setTemplate(true); // Template Imageとして扱う（ダークモード対応）
+                    button.setImage(Some(&img));
+                }
+            }
+        }
     }
 
     /// 等幅フォントでタイトルを設定
