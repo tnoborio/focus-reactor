@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use anyhow::Result;
 use eframe::egui;
 #[cfg(target_os = "macos")]
@@ -8,6 +10,17 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tray_icon::{TrayIcon, TrayIconBuilder};
+
+fn load_app_icon() -> Option<egui::IconData> {
+    let icon_bytes = include_bytes!("../assets/app_icon.png");
+    let img = image::load_from_memory(icon_bytes).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    Some(egui::IconData {
+        rgba: img.into_raw(),
+        width,
+        height,
+    })
+}
 
 #[cfg(target_os = "macos")]
 mod macos_status_bar;
@@ -51,7 +64,36 @@ struct SharedState {
     should_focus: bool,
 }
 
+#[cfg(target_os = "macos")]
+fn set_macos_dock_icon() {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    let icon_bytes = include_bytes!("../assets/app_icon.png");
+    unsafe {
+        let ns_data: *mut AnyObject = msg_send![
+            class!(NSData),
+            dataWithBytes: icon_bytes.as_ptr() as *const std::ffi::c_void,
+            length: icon_bytes.len()
+        ];
+        if ns_data.is_null() {
+            return;
+        }
+        let img_alloc: *mut AnyObject = msg_send![class!(NSImage), alloc];
+        let img: *mut AnyObject = msg_send![img_alloc, initWithData: ns_data];
+        if img.is_null() {
+            return;
+        }
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, setApplicationIconImage: img];
+    }
+}
+
 fn main() -> Result<()> {
+    // macOS Dockアイコンを設定
+    #[cfg(target_os = "macos")]
+    set_macos_dock_icon();
+
     // 共有状態
     let shared_state = Arc::new(Mutex::new(SharedState {
         state: TimerState::Idle,
@@ -118,11 +160,15 @@ fn main() -> Result<()> {
     }));
 
     // eframeアプリを起動
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([400.0, 180.0])
+        .with_min_inner_size([300.0, 180.0])
+        .with_transparent(true);
+    if let Some(icon_data) = load_app_icon() {
+        viewport = viewport.with_icon(Arc::new(icon_data));
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 180.0])
-            .with_min_inner_size([300.0, 180.0])
-            .with_transparent(true),
+        viewport,
         ..Default::default()
     };
 

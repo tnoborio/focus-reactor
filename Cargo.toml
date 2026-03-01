@@ -9,6 +9,15 @@ anyhow = "1.0"
 time = { version = "0.3", features = ["macros", "formatting"] }
 tray-icon = "0.19"
 muda = "0.15"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[package.metadata.bundle]
+name = "Focus Reactor"
+identifier = "com.meowtaverse.focus-reactor"
+category = "public.app-category.productivity"
+short_description = "A focus timer app"
+osx_minimum_system_version = "10.15"
+icon = ["assets/AppIcon.icns"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
